@@ -14,7 +14,7 @@ import networkx as nx
 __author__ = "Carlos Leocadio"
 __copyright__ = "Copyright (c) 2022 Carlos Leocadio"
 __license__ = "MIT"
-__version__ = "0.9.1"
+__version__ = "0.9.2"
 
 """
 bum-tree-checker.py: checks BUM tree graph connectivity using data from
@@ -117,7 +117,12 @@ def extract_mcast_tree_cc(connections, xml_f):
     for i in range(2):
         level_string_tag = 'level'+ str(i) + '_forwarders'
         log.debug("Extract Mcast Tree - Level String - {}" .format(level_string_tag))
-        li_forwarders = xml_f.getElementsByTagName(level_string_tag)
+        li_forwarders = getElementsByTagName_safe(xml_f, level_string_tag)
+        
+        # if there are no leveX_forwarders, we can just skip this level
+        if not li_forwarders: 
+            log.error("Empty - Level String - {}" .format(level_string_tag))
+            continue
 
         fwd_elements = li_forwarders.item(0).getElementsByTagName('ShowMulticastForwarder')
 
