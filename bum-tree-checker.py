@@ -186,9 +186,10 @@ def main():
         log.info("Controllers list size must be 3")
         exit(2)
 
+    # virtual network uuid
     net_uuid = args.netid
 
-    # dict with list of peers for each multicast forwarder as per Controllers
+    # dict with list of peers for each multicast forwarder as per Controllers 
     connections = defaultdict(list)
 
     # dict with list of peers according to vRouter CLI
@@ -201,10 +202,6 @@ def main():
     vhost0_ips = defaultdict()
 
 
-    # Convert the VN UUID into name 
-    # INFO Network ID ae4c86fc-8f0e-4c73-820a-4e4a4e42f05a
-    # INFO Subnet ID 1e1bd89d-454a-47c8-bba2-9777bbbb544d
-    # Use Openstack module 
     log.info("Connecting to Openstack API...")
     conn = openstack.connect()
     network_obj = conn.network.find_network(args.netid)
@@ -233,9 +230,7 @@ def main():
         https://127.0.0.1:8083/Snh_ShowMulticastManagerDetailReq?x="\
         + vrf_name +".ermvpn.0"
 
-    log.debug("curl CMD string {} " .format(cmd_string))
-
-    # connect to each CC and extract local tree
+    # connect to each CC and extract local Mcast tree
     for c in ccs_list:
         client = paramiko.SSHClient()
         client.load_system_host_keys()
@@ -254,8 +249,6 @@ def main():
             log.error("Status Error while reading Mcast tree from {} " .format(c))
 
         client.close()
-        
-        
 
     log.info("Connections Matrix from Controllers")
     for k,v in connections.items():
@@ -265,13 +258,8 @@ def main():
     # at this point in code, we have the full connections matrix as programmed in the controllers
 
     """
-    now we need to find out what computes have interfaces connected to the VRF (--net)
+    now we need to find out what computes have interfaces on the virtual network with ID matching net_uuid
     assuming 'source overcloudrc' is already performed, we can use openstack client to get list of all ports
-    
-    <domain>:<project>:<network>:<subnet>
-    and I am assuming
-    <network> == <subnet>
-    net = "default-domain:ngnp_E2E:ngnp-tdcn-m2m-dpe-e2e-ch2:ngnp-tdcn-m2m-dpe-e2e-ch2"
     """
 
     # key Port UUID - value IP and binding host tuple
@@ -295,7 +283,7 @@ def main():
 
     log.info("Binding Hosts Set {}" .format(binding_hosts_set))
     
-    
+
     ## now, connect to each compute in binding_hosts_set via SSH and get the Vif ID belonging to --net from introspect
     cmd_string = "sudo curl -s -k \
                 --key /etc/contrail/ssl/private/server-privkey.pem\
@@ -313,7 +301,7 @@ def main():
 
         if status >= 0: 
             xml_dom = minidom.parse(stdout)
-            pretty_xml_as_string = xml_dom.toprettyxml(encoding='UTF-8')
+            #pretty_xml_as_string = xml_dom.toprettyxml(encoding='UTF-8')
             #log.debug("Fetching Interfaces XML file from Compute {}\n{} " .format(c, pretty_xml_as_string))
             log.debug("Fetching Interfaces XML file from Compute {} belonging to network {} " .format(c, vrf_name))
             vifs_per_compute[c] = get_vifs_attached_net(network_ports, vrf_name, xml_dom)
