@@ -88,15 +88,27 @@ def get_vhost0(itf_xml):
             return vhost0_addr
 
 # takes XML from Snh_ItfReq and returns all vifs belonging to net
-def get_vifs_attached_net(net, itf_xml):
+def get_vifs_attached_net(network_ports, vrf_name, itf_xml):
     vifs = []
     itf_elements = itf_xml.getElementsByTagName('ItfSandeshData')
     for e in itf_elements:
         itf_id = getElementsByTagName_safe(e, 'index')
+        itf_uuid = getElementsByTagName_safe(e, 'uuid')
+        itf_active = getElementsByTagName_safe(e, 'active')
         itf_vrf = getElementsByTagName_safe(e, 'vrf_name')
-
-        if itf_vrf == net: vifs.append(itf_id)
-
+        
+        ## vrf_name is not unique, and Port UUID needs to be used to confirm
+        ## via Openstack if the Interface Element belongs to our Network
+        ## network_ports keys() are all the ports belonging to our network
+        
+        if itf_uuid in network_ports.keys(): 
+            if itf_vrf == vrf_name and itf_active == 'Active':
+                log.debug("Saving Vif {} " .format(itf_id))
+                vifs.append(itf_id)
+            else:
+                log.error("Skipping UUID {} - Vif {} - State {} - VRF Name {}" .format(itf_uuid, itf_id, itf_active, itf_vrf))
+   
+    log.debug("Vifs Array {} ".format(vifs))
     return vifs
 
 def extract_mcast_tree_cc(connections, xml_f):
@@ -142,8 +154,8 @@ def cli_menu():
     parser = argparse.ArgumentParser(
         description='bum-tree-checker.py: script to check BUM tree graph connectivity')
 
-    parser.add_argument('-n', '--net',
-                        help="VRF Description string <a:b:c:d> format",
+    parser.add_argument('-n', '--netid',
+                        help="Virtual Network Object UUID",
                         action="store",
                         required=True)
 
@@ -167,15 +179,14 @@ def main():
 
     log.setLevel(args.loglevel)
     log.info("Starting bum-tree-checker.py")
-    
-    # VRF from vif_report.py table
-    vrf_name = args.net
 
     # List of Contrail Controller addresses
     ccs_list = args.controllers
     if len(ccs_list) != 3:
         log.info("Controllers list size must be 3")
         exit(2)
+
+    net_uuid = args.netid
 
     # dict with list of peers for each multicast forwarder as per Controllers
     connections = defaultdict(list)
@@ -189,7 +200,32 @@ def main():
     # dict to map compute hostname to vhost0 IP
     vhost0_ips = defaultdict()
 
-    log.info("VRF {} parsed - CCs {} " .format(vrf_name, ccs_list))
+
+    # Convert the VN UUID into name 
+    # INFO Network ID ae4c86fc-8f0e-4c73-820a-4e4a4e42f05a
+    # INFO Subnet ID 1e1bd89d-454a-47c8-bba2-9777bbbb544d
+    # Use Openstack module 
+    log.info("Connecting to Openstack API...")
+    conn = openstack.connect()
+    network_obj = conn.network.find_network(args.netid)
+    log.debug("Network: {} " .format(network_obj))
+
+    subnet_obj = conn.network.find_subnet(network_obj.subnet_ids[0])
+    log.debug("Subnet: {} " .format(subnet_obj))
+
+    project_obj = conn.identity.find_project(network_obj.project_id)
+    log.debug("Project: {} " .format(project_obj))
+
+    domain_obj = conn.identity.find_domain(project_obj.domain_id)
+    log.debug("Domain: {} " .format(domain_obj))
+
+    ##vrf_name = domain_obj.name + ':' + project_obj.name + ':' + network_obj.name + ':' + subnet_obj.name
+    ##vrf_name = 'default-domain:NIMS_Core_RTL_REF:N_InternalOAM:N_InternalOAM'
+    ## TODO: verify why the vrf_name is constructed this way
+    vrf_name = 'default-domain' + ':' + project_obj.name + ':' + network_obj.name + ':' + network_obj.name
+    log.info("Network UUID {} is {} " .format(net_uuid, vrf_name))
+
+    log.info("CCs {} " .format(ccs_list))
 
     cmd_string = "sudo curl -s -k \
         --key /etc/contrail/ssl/private/server-privkey.pem\
@@ -212,17 +248,20 @@ def main():
             xml_dom = minidom.parse(stdout)
             pretty_xml_as_string = xml_dom.toprettyxml(encoding='UTF-8')
             log.debug("XML file CC {}\n{} " .format(c, pretty_xml_as_string))
+            log.info("Extracting Mcast tree from Controller {} " .format(c))
+            extract_mcast_tree_cc(connections, xml_dom)
+        else:
+            log.error("Status Error while reading Mcast tree from {} " .format(c))
 
         client.close()
-        log.info("Extracting Mcast tree from Controller {} " .format(c))
-        extract_mcast_tree_cc(connections, xml_dom)
         
-    
+        
+
     log.info("Connections Matrix from Controllers")
     for k,v in connections.items():
         log.info("{} - {} " .format(k, json.dumps(v)))
 
-
+    
     # at this point in code, we have the full connections matrix as programmed in the controllers
 
     """
@@ -235,51 +274,28 @@ def main():
     net = "default-domain:ngnp_E2E:ngnp-tdcn-m2m-dpe-e2e-ch2:ngnp-tdcn-m2m-dpe-e2e-ch2"
     """
 
-    log.info("Connecting to Openstack API...")
-    conn = openstack.connect()
+    # key Port UUID - value IP and binding host tuple
+    network_ports = defaultdict()
 
-    network_ports = []
-
-    # get the network object
-    networks_list = conn.network.networks()
-    for n in networks_list:
-        if n.name == args.net.split(':')[2]:
-            _network = n
-            break
-
-    # log network id
-    log.info("Network ID {}" .format(_network.id))
-
-    # use the network object to get the subnet id
-    log.info("Subnet ID {}" .format(_network.subnet_ids[0]))
-
-
-    # get subnet object using id
-    if len(_network.subnet_ids) > 1: exit(3)
-    subnet = conn.network.find_subnet(_network.subnet_ids[0])
-    log.debug("Subnet details {}" .format(subnet))
-
-    # now, retrieve all ports belonging to _network (ports_list is a generator)
     ports_list = conn.network.ports()
 
     for p in ports_list:
-        if p.network_id == _network.id:
+        if p.network_id == network_obj.id:
             #print("Port ID %s - Fixed IPs %s - Host %s" % (p.id, p.fixed_ips, p.binding_host_id))
             #build a list of tuples (port ID, Fixed IPs, Binding Host)
-            network_ports.append((p.id, p.fixed_ips, p.binding_host_id.split(".")[0]))
+            network_ports[p.id] = (p.fixed_ips, p.binding_host_id.split(".")[0])
 
-    log.info("Listing Ports belonging to Network {} " .format(_network.id))
+    log.info("Listing Ports belonging to Network {} " .format(network_obj.id))
     # extract binding_hosts set while logging the ports in the network
     binding_hosts_set = []
-    for t in network_ports:
-        log.info("Port ID {} - Fixed IPs - {} - Binding host {}" .format(t[0], t[1], t[2]))
-        if t[2] not in binding_hosts_set: binding_hosts_set.append(t[2])
-    log.info("Total number of ports on Network {} is {}" .format(_network.id, len(network_ports)))
+    for k,t in network_ports.items():
+        log.info("Port ID {} - Fixed IPs - {} - Binding host {}" .format(k, t[0], t[1]))
+        if t[1] not in binding_hosts_set: binding_hosts_set.append(t[1])
+    log.info("Total number of ports on Network {} is {}" .format(network_obj.id, len(network_ports)))
 
     log.info("Binding Hosts Set {}" .format(binding_hosts_set))
     
-
-
+    
     ## now, connect to each compute in binding_hosts_set via SSH and get the Vif ID belonging to --net from introspect
     cmd_string = "sudo curl -s -k \
                 --key /etc/contrail/ssl/private/server-privkey.pem\
@@ -298,21 +314,27 @@ def main():
         if status >= 0: 
             xml_dom = minidom.parse(stdout)
             pretty_xml_as_string = xml_dom.toprettyxml(encoding='UTF-8')
-            log.debug("Interfaces XML file from Compute {}\n{} " .format(c, pretty_xml_as_string))
+            #log.debug("Fetching Interfaces XML file from Compute {}\n{} " .format(c, pretty_xml_as_string))
+            log.debug("Fetching Interfaces XML file from Compute {} belonging to network {} " .format(c, vrf_name))
+            vifs_per_compute[c] = get_vifs_attached_net(network_ports, vrf_name, xml_dom)
+            vhost0_ips[c] = get_vhost0(xml_dom)
+        else:
+            log.error("Status Error while reading ItfReq from {} " .format(c))
 
         client.close()
-        vifs_per_compute[c] = get_vifs_attached_net(args.net, xml_dom)
 
-        vhost0_ips[c] = get_vhost0(xml_dom)
-
-    log.info("Listing Vif IDs per compute")
+    log.info("Listing Vif IDs per Compute")
+    total_vifs_counter = 0
     for k,v in vifs_per_compute.items():
-        log.info("Compute {} - vifs {} " .format(k, v))
+        log.info("Compute {} [{}] - VIFs {} " .format(k, vhost0_ips[k], v))
+        total_vifs_counter += len(v)
+    
+    log.info("Total number of VIFs found {} - And Total number of Port objects is {} " .format(total_vifs_counter, len(network_ports)))
 
-    log.info("Listing vhost0 IP addresses per compute")
-    for k,v in vhost0_ips.items():
-        log.info("Compute {} - {} " .format(k, v))
-
+    if total_vifs_counter != len(network_ports):
+        log.error("Mismatch between number of VIFs found and Total of Port Objects")
+        exit(1)
+  
 
     ### now, we need to SSH into each compute in binding_hosts_set to get rt and nh info
     ### for the broadcast L2 address
