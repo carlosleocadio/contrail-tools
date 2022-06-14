@@ -14,7 +14,7 @@ import networkx as nx
 __author__ = "Carlos Leocadio"
 __copyright__ = "Copyright (c) 2022 Carlos Leocadio"
 __license__ = "MIT"
-__version__ = "0.9.3"
+__version__ = "0.9.4"
 
 """
 bum-tree-checker.py: checks BUM tree graph connectivity using data from
@@ -209,9 +209,15 @@ def main():
 
     log.info("Connecting to Openstack API...")
     conn = openstack.connect()
-    network_obj = conn.network.find_network(args.netid)
+    network_obj = conn.network.find_network(net_uuid)
     log.debug("Network: {} " .format(network_obj))
 
+    if len(network_obj.subnet_ids) > 1:
+        log.warning("Network {} has more than 1 subnet - {}\n\
+            Code execution will proceed. We only care about Network UUID and ports that belong to that Network.\
+            Contrail considers all subnets of a given VN belong to the same VRF." .format(net_uuid, network_obj.subnet_ids))
+
+    # the subnet object is not relevant - ignore
     subnet_obj = conn.network.find_subnet(network_obj.subnet_ids[0])
     log.debug("Subnet: {} " .format(subnet_obj))
 
@@ -272,11 +278,10 @@ def main():
 
     # a generator for all port objects in Openstack
     ports_list = conn.network.ports()
-
+    
+    # save for later processing all ports that belong to netid (argument) and that are ACTIVE
     for p in ports_list:
-        if p.network_id == network_obj.id:
-            #print("Port ID %s - Fixed IPs %s - Host %s" % (p.id, p.fixed_ips, p.binding_host_id))
-            #build a list of tuples (port ID, Fixed IPs, Binding Host)
+        if p.network_id == network_obj.id and p.status == 'ACTIVE':
             network_ports[p.id] = (p.fixed_ips, p.binding_host_id.split(".")[0])
 
     
