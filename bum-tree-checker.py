@@ -14,7 +14,7 @@ import networkx as nx
 __author__ = "Carlos Leocadio"
 __copyright__ = "Copyright (c) 2022 Carlos Leocadio"
 __license__ = "MIT"
-__version__ = "0.9.4"
+__version__ = "0.9.5"
 
 """
 bum-tree-checker.py: checks BUM tree graph connectivity using data from
