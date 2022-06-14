@@ -14,7 +14,7 @@ import networkx as nx
 __author__ = "Carlos Leocadio"
 __copyright__ = "Copyright (c) 2022 Carlos Leocadio"
 __license__ = "MIT"
-__version__ = "0.9.5"
+__version__ = "0.9.6"
 
 """
 bum-tree-checker.py: checks BUM tree graph connectivity using data from
@@ -411,6 +411,7 @@ def main():
     if not nx.is_strongly_connected(C):
         # this will only return missing edge if the edge is missing in one direction but present on the other
         # asusming link symmetry in directional graph
+        # for a given Node A, if there is a edge E1 to Node B then there will be a symetrical edge E2 linking B to A
         missing_edges = find_missing_edges(C)
         if len(missing_edges) > 0:
             log.info("C Missing edges {} " .format(missing_edges))
@@ -420,6 +421,7 @@ def main():
         log.info("Graph C is weakly connected - subgraphs are {}" .format(list(nx.weakly_connected_components(C))))
     else:
         log.info("Graph C is strongly connected")
+
 
 
     # V Graph analysis
@@ -436,10 +438,15 @@ def main():
             log.info("Graph V Weakly connected components [subgraphs] {}" .format(list(nx.weakly_connected_components(V))))
             missing_edges_in_v = compare_edges_graphs(C,V)
             log.info("Missing Edges in V present in C {}" .format(missing_edges_in_v))
-
     else:
         log.info("Graph V is strongly connected")
 
+        
+    # exit code logic
+    if nx.is_strongly_connected(C) and nx.is_strongly_connected(V) and nx.is_isomorphic(C,V):
+        exit(0)
+    else:
+        exit(1)
 
 
 if __name__ == "__main__":
