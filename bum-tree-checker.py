@@ -117,8 +117,8 @@ def extract_mcast_tree_cc(connections, xml_f):
     for i in range(2):
         level_string_tag = 'level'+ str(i) + '_forwarders'
         log.debug("Extract Mcast Tree - Level String - {}" .format(level_string_tag))
-        li_forwarders = getElementsByTagName_safe(xml_f, level_string_tag)
-        
+        li_forwarders = xml_f.getElementsByTagName(level_string_tag)
+
         # if there are no leveX_forwarders, we can just skip this level
         if not li_forwarders: 
             log.error("Empty - Level String - {}" .format(level_string_tag))
@@ -261,9 +261,13 @@ def main():
 
         client.close()
 
-    log.info("Connections Matrix from Controllers")
-    for k,v in connections.items():
-        log.info("{} - {} " .format(k, json.dumps(v)))
+    if len(connections) == 0:
+        log.error("Unable to create connections matrix from Controllers")
+        exit(2)
+    else:
+        log.info("Connections Matrix from Controllers")
+        for k,v in connections.items():
+            log.info("{} - {} " .format(k, json.dumps(v)))
 
     
     # at this point in code, we have the full connections matrix as programmed in the controllers
