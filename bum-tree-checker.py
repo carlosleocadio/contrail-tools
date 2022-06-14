@@ -14,7 +14,7 @@ import networkx as nx
 __author__ = "Carlos Leocadio"
 __copyright__ = "Copyright (c) 2022 Carlos Leocadio"
 __license__ = "MIT"
-__version__ = "0.9.2"
+__version__ = "0.9.3"
 
 """
 bum-tree-checker.py: checks BUM tree graph connectivity using data from
@@ -270,6 +270,7 @@ def main():
     # key Port UUID - value IP and binding host tuple
     network_ports = defaultdict()
 
+    # a generator for all port objects in Openstack
     ports_list = conn.network.ports()
 
     for p in ports_list:
@@ -278,7 +279,13 @@ def main():
             #build a list of tuples (port ID, Fixed IPs, Binding Host)
             network_ports[p.id] = (p.fixed_ips, p.binding_host_id.split(".")[0])
 
-    log.info("Listing Ports belonging to Network {} " .format(network_obj.id))
+    
+    if len(network_ports) > 0: 
+        log.info("Listing Ports belonging to Network {}" .format(network_obj.id))
+    else: 
+        log.error("No ports on Network {} - Subnet {} \nExiting" .format(net_uuid, subnet_obj.id))
+        exit(2)
+    
     # extract binding_hosts set while logging the ports in the network
     binding_hosts_set = []
     for k,t in network_ports.items():
