@@ -14,7 +14,7 @@ import networkx as nx
 __author__ = "Carlos Leocadio"
 __copyright__ = "Copyright (c) 2022 Carlos Leocadio"
 __license__ = "MIT"
-__version__ = "0.9.6"
+__version__ = "0.9.7"
 
 """
 bum-tree-checker.py: checks BUM tree graph connectivity using data from
@@ -73,9 +73,7 @@ def getElementsByTagName_safe(xml_elem, tag):
     try:
         n = xml_elem.getElementsByTagName(tag)[0].childNodes[0].nodeValue
     except IndexError:
-        #print('Empty Node Value for tag', tag)
         pass
-    
     return n
 
 # takes XML from Snh_ItfReq and returns vhost0 interface - id 1 - IP address
@@ -99,7 +97,7 @@ def get_vifs_attached_net(network_ports, vrf_name, itf_xml):
         
         ## vrf_name is not unique, and Port UUID needs to be used to confirm
         ## via Openstack if the Interface Element belongs to our Network
-        ## network_ports keys() are all the ports belonging to our network
+        ## network_ports.keys() are all the ports belonging to our network
         
         if itf_uuid in network_ports.keys(): 
             if itf_vrf == vrf_name and itf_active == 'Active':
@@ -206,7 +204,6 @@ def main():
     # dict to map compute hostname to vhost0 IP
     vhost0_ips = defaultdict()
 
-
     log.info("Connecting to Openstack API...")
     conn = openstack.connect()
     network_obj = conn.network.find_network(net_uuid)
@@ -216,10 +213,14 @@ def main():
         log.warning("Network {} has more than 1 subnet - {}\n\
             Code execution will proceed. We only care about Network UUID and ports that belong to that Network.\
             Contrail considers all subnets of a given VN belong to the same VRF." .format(net_uuid, network_obj.subnet_ids))
+    
+        # the subnet object is not relevant - ignore - Contrail only uses VN to define the VRF Name
+        subnet_obj = conn.network.find_subnet(network_obj.subnet_ids[0])
+        log.debug("Subnet: {} " .format(subnet_obj))
+    
+    elif len(network_obj.subnet_ids) == 0:
+        log.error("No subnets found on Network {}" .format(net_uuid))
 
-    # the subnet object is not relevant - ignore
-    subnet_obj = conn.network.find_subnet(network_obj.subnet_ids[0])
-    log.debug("Subnet: {} " .format(subnet_obj))
 
     project_obj = conn.identity.find_project(network_obj.project_id)
     log.debug("Project: {} " .format(project_obj))
@@ -435,7 +436,7 @@ def main():
             log.info("Unable to determine missing edge in V - there are weakly connected edges - proceed with verification")     
 
         if len(list(nx.weakly_connected_components(V))) > 1:
-            log.info("Graph V Weakly connected components [subgraphs] {}" .format(list(nx.weakly_connected_components(V))))
+            log.info("Graph V weakly connected components [subgraphs] {}" .format(list(nx.weakly_connected_components(V))))
             missing_edges_in_v = compare_edges_graphs(C,V)
             log.info("Missing Edges in V present in C {}" .format(missing_edges_in_v))
     else:
