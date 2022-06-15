@@ -2,14 +2,12 @@
 
 import argparse
 import re
-import prettytable
 from xml.dom import minidom
 from collections import defaultdict
 import paramiko
 import logging
 import json
 import openstack
-import networkx as nx
 from networkx import DiGraph, is_isomorphic, is_strongly_connected, weakly_connected_components
 
 __author__ = "Carlos Leocadio"
