@@ -10,11 +10,12 @@ import logging
 import json
 import openstack
 import networkx as nx
+from networkx import DiGraph, is_isomorphic, is_strongly_connected, weakly_connected_components
 
 __author__ = "Carlos Leocadio"
 __copyright__ = "Copyright (c) 2022 Carlos Leocadio"
 __license__ = "MIT"
-__version__ = "0.9.7"
+__version__ = "0.9.8"
 
 """
 bum-tree-checker.py: checks BUM tree graph connectivity using data from
@@ -37,23 +38,15 @@ log = logging.getLogger('bum-tree-checker')
 
 ## Graph logic auxiliar methods
 def build_graph_from_matrix(matrix):
-    G = nx.DiGraph()
-
+    G = DiGraph()
     for k,v in matrix.items():
         for i in v:
             G.add_edge(k, i)
-
     return G
 
 # find missing edges on weakly connected Directed graph
 def find_missing_edges(graph):
-    missing_e = []
-    #determine the missing edge
-    for e in graph.edges():
-        # for each edge (i,j), edge (j,i) must be present in list
-        if (e[1], e[0]) not in graph.edges():
-            #print("Missing edge is {} " .format((e[1], e[0])))
-            missing_e.append((e[1], e[0]))  
+    missing_e = [(e[1], e[0]) for e in graph.edges() if (e[1], e[0]) not in graph.edges()]
     return missing_e
 
 # compare Graphs A and B edges, returning list of edges
@@ -62,8 +55,7 @@ def compare_edges_graphs(graph_a, graph_b):
     missing_edges_in_b = []
     edges_a = graph_a.edges()
     edges_b = graph_b.edges()
-    for e in edges_a:
-        if e not in edges_b: missing_edges_in_b.append(e)
+    missing_edges_in_b = [e for e in edges_a if e not in edges_b]
     return missing_edges_in_b
 
 ####
@@ -109,11 +101,11 @@ def get_vifs_attached_net(network_ports, vrf_name, itf_xml):
     log.debug("Vifs Array {} ".format(vifs))
     return vifs
 
-def extract_mcast_tree_cc(connections, xml_f):
 
+def extract_mcast_tree_cc(connections, xml_f):
     #get levelX_forwarders for xml_f extracted from cc
     for i in range(2):
-        level_string_tag = 'level'+ str(i) + '_forwarders'
+        level_string_tag = ''.join(['level', str(i), '_forwarders' ])
         log.debug("Extract Mcast Tree - Level String - {}" .format(level_string_tag))
         li_forwarders = xml_f.getElementsByTagName(level_string_tag)
 
@@ -231,16 +223,16 @@ def main():
     ##vrf_name = domain_obj.name + ':' + project_obj.name + ':' + network_obj.name + ':' + subnet_obj.name
     ##vrf_name = 'default-domain:NIMS_Core_RTL_REF:N_InternalOAM:N_InternalOAM'
     ## TODO: verify why the vrf_name is constructed this way
-    vrf_name = 'default-domain' + ':' + project_obj.name + ':' + network_obj.name + ':' + network_obj.name
+    vrf_name = ':'.join(['default-domain', project_obj.name, network_obj.name, network_obj.name])
+
     log.info("Network UUID {} is {} " .format(net_uuid, vrf_name))
 
     log.info("CCs {} " .format(ccs_list))
 
-    cmd_string = "sudo curl -s -k \
+    cmd_string = ''.join(["sudo curl -s -k\
         --key /etc/contrail/ssl/private/server-privkey.pem\
         --cert /etc/contrail/ssl/certs/server.pem\
-        https://127.0.0.1:8083/Snh_ShowMulticastManagerDetailReq?x="\
-        + vrf_name +".ermvpn.0"
+        https://127.0.0.1:8083/Snh_ShowMulticastManagerDetailReq?x=", vrf_name, ".ermvpn.0"])
 
     # connect to each CC and extract local Mcast tree
     for c in ccs_list:
@@ -278,7 +270,7 @@ def main():
     assuming 'source overcloudrc' is already performed, we can use openstack client to get list of all ports
     """
 
-    # key Port UUID - value IP and binding host tuple
+    # key is Port UUID - value is IP and binding host tuple
     network_ports = defaultdict()
 
     # a generator for all port objects in Openstack
@@ -317,7 +309,7 @@ def main():
         client = paramiko.SSHClient()
         client.load_system_host_keys()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(c+'.ctlplane', username='heat-admin')
+        client.connect('.'.join([c,'ctlplane']), username='heat-admin')
         stdin, stdout, stderr = client.exec_command(cmd_string)
         status = stdout.channel.recv_exit_status()
 
@@ -360,24 +352,24 @@ def main():
 
     for c,vifs in vifs_per_compute.items():
         for v in vifs:
-            cmd_a = 'sudo docker exec contrail_vrouter_agent vif --get ' + v
-            status, result = run_cmd_remote(c+'.ctlplane', cmd_a)
+            cmd_a = ''.join(['sudo docker exec contrail_vrouter_agent vif --get ', v])
+            status, result = run_cmd_remote('.'.join([c,'ctlplane']), cmd_a)
 
             if status >= 0:
                 match = re.search(vrf_pattern, result)
                 vrf = match.group('vrf')
                 log.debug("VRF {}" .format(vrf))
 
-            cmd_b = 'sudo docker exec contrail_vrouter_agent rt --get ff:ff:ff:ff:ff:ff --vrf ' + vrf + ' --family bridge'
-            status, result = run_cmd_remote(c+'.ctlplane', cmd_b)
+            cmd_b = ''.join(['sudo docker exec contrail_vrouter_agent rt --get ff:ff:ff:ff:ff:ff --vrf ', vrf, ' --family bridge'])
+            status, result = run_cmd_remote('.'.join([c,'ctlplane']), cmd_b)
 
             if status >= 0:
                 match = re.search(nh_pattern, result)
                 nh = match.group('nh')
                 log.debug("NH {}" .format(nh))
 
-            cmd_c = 'sudo docker exec contrail_vrouter_agent nh --get ' + nh
-            status, result = run_cmd_remote(c+'.ctlplane', cmd_c)
+            cmd_c = ''.join(['sudo docker exec contrail_vrouter_agent nh --get ', nh])
+            status, result = run_cmd_remote('.'.join([c,'ctlplane']), cmd_c)
 
             if status >= 0:
                 match_list = re.findall(vrf0_leg_pattern, result)
@@ -402,14 +394,14 @@ def main():
     C = build_graph_from_matrix(connections)
     V = build_graph_from_matrix(connections_vrouter)
 
-    log.info("Are C (Controllers) and V (vRouter) graphs isomorphic (?) -> {}" .format(nx.is_isomorphic(C,V)))
+    log.info("Are C (Controllers) and V (vRouter) graphs isomorphic (?) -> {}" .format(is_isomorphic(C,V)))
     # If C and V are isomorphic we can stop code execution... but for now let's proceed with analysis 
 
     # C Graph analysis
     log.debug("C Nodes: {}" .format(C.nodes()))
     log.debug("C Edges: {}" .format(C.edges()))
 
-    if not nx.is_strongly_connected(C):
+    if not is_strongly_connected(C):
         # this will only return missing edge if the edge is missing in one direction but present on the other
         # asusming link symmetry in directional graph
         # for a given Node A, if there is a edge E1 to Node B then there will be a symetrical edge E2 linking B to A
@@ -419,7 +411,7 @@ def main():
         else:
             log.info("Unable to determine missing edge in C - there are weakly connected edges - proceed with verification")     
 
-        log.info("Graph C is weakly connected - subgraphs are {}" .format(list(nx.weakly_connected_components(C))))
+        log.info("Graph C is weakly connected - subgraphs are {}" .format(list(weakly_connected_components(C))))
     else:
         log.info("Graph C is strongly connected")
 
@@ -428,15 +420,15 @@ def main():
     # V Graph analysis
     log.debug("V Nodes: {}" .format(V.nodes()))
     log.debug("V Edges: {}" .format(V.edges()))
-    if not nx.is_strongly_connected(V): 
+    if not is_strongly_connected(V): 
         missing_edges = find_missing_edges(V)
         if len(missing_edges) > 0:
             log.info("V Missing edges {} " .format(missing_edges))
         else:
             log.info("Unable to determine missing edge in V - there are weakly connected edges - proceed with verification")     
 
-        if len(list(nx.weakly_connected_components(V))) > 1:
-            log.info("Graph V weakly connected components [subgraphs] {}" .format(list(nx.weakly_connected_components(V))))
+        if len(list(weakly_connected_components(V))) > 1:
+            log.info("Graph V weakly connected components [subgraphs] {}" .format(list(weakly_connected_components(V))))
             missing_edges_in_v = compare_edges_graphs(C,V)
             log.info("Missing Edges in V present in C {}" .format(missing_edges_in_v))
     else:
@@ -444,7 +436,7 @@ def main():
 
         
     # exit code logic
-    if nx.is_strongly_connected(C) and nx.is_strongly_connected(V) and nx.is_isomorphic(C,V):
+    if is_strongly_connected(C) and is_strongly_connected(V) and is_isomorphic(C,V):
         exit(0)
     else:
         exit(1)
