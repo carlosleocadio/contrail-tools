@@ -13,7 +13,7 @@ from networkx import DiGraph, is_isomorphic, is_strongly_connected, weakly_conne
 __author__ = "Carlos Leocadio"
 __copyright__ = "Copyright (c) 2022 Carlos Leocadio"
 __license__ = "MIT"
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 """
 bum-tree-checker.py: checks BUM tree graph connectivity using data from
@@ -130,19 +130,31 @@ def extract_mcast_tree_cc(connections, xml_f):
 
     return connections
 
-def run_cmd_remote(host, user, cmd):
+
+
+def open_ssh_channel(host, user):
     client = paramiko.SSHClient()
     client.load_system_host_keys()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     client.connect(host, username=user)
+    return client
+
+
+def run_cmd_remote(client, cmd):
+    #client = paramiko.SSHClient()
+    #client.load_system_host_keys()
+    #client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    #client.connect(host, username=user)
     stdin, stdout, stderr = client.exec_command(cmd)
     status = stdout.channel.recv_exit_status()
 
     if status >= 0: 
         result = stdout.read()
 
-    client.close()
+    #client.close()
     return status, result
+
+
 
 def cli_menu():
     parser = argparse.ArgumentParser(
@@ -291,7 +303,9 @@ def main():
 
         # connect to each CC and extract local Mcast tree
         for c in ccs_list:
-            status, result = run_cmd_remote(c, 'heat-admin', cmd_string)
+            client = open_ssh_channel(c, 'heat-admin')
+            status, result = run_cmd_remote(client, cmd_string)
+            client.close()
 
             if status >= 0: 
                 xml_dom = minidom.parseString(result)
@@ -347,7 +361,9 @@ def main():
 
         log.debug("curl CMD string {} " .format(cmd_string))
         for c in binding_hosts_set:
-            status, result = run_cmd_remote('.'.join([c,'ctlplane']), 'heat-admin', cmd_string)
+            client = open_ssh_channel('.'.join([c,'ctlplane']), 'heat-admin')
+            status, result = run_cmd_remote(client, cmd_string)
+            client.close()
 
             if status >= 0: 
                 xml_dom = minidom.parseString(result)
@@ -376,9 +392,10 @@ def main():
 
 
         for c,vifs in vifs_per_compute.items():
+            client = open_ssh_channel('.'.join([c,'ctlplane']), 'heat-admin')
             for v in vifs:
                 cmd_a = ''.join(['sudo docker exec contrail_vrouter_agent vif --get ', v])
-                status, result = run_cmd_remote('.'.join([c,'ctlplane']), 'heat-admin', cmd_a)
+                status, result = run_cmd_remote(client, cmd_a)
 
                 if status >= 0:
                     match = re.search(vrf_pattern, result)
@@ -386,7 +403,7 @@ def main():
                     log.debug("VRF {}" .format(vrf))
 
                 cmd_b = ''.join(['sudo docker exec contrail_vrouter_agent rt --get ff:ff:ff:ff:ff:ff --vrf ', vrf, ' --family bridge'])
-                status, result = run_cmd_remote('.'.join([c,'ctlplane']), 'heat-admin', cmd_b)
+                status, result = run_cmd_remote(client, cmd_b)
 
                 if status >= 0:
                     match = re.search(nh_pattern, result)
@@ -394,7 +411,7 @@ def main():
                     log.debug("NH {}" .format(nh))
 
                 cmd_c = ''.join(['sudo docker exec contrail_vrouter_agent nh --get ', nh])
-                status, result = run_cmd_remote('.'.join([c,'ctlplane']), 'heat-admin', cmd_c)
+                status, result = run_cmd_remote(client, cmd_c)
 
                 if status >= 0:
                     match_list = re.findall(vrf0_leg_pattern, result)
@@ -402,7 +419,8 @@ def main():
                         log.debug("sip {} dip {} " .format(t[0], t[1]))
                         if t[1] not in connections_vrouter[t[0]]:
                             connections_vrouter[t[0]].append(t[1])
-
+            
+            client.close()
 
         log.info("Connections Matrix from vRouter CLI")
         for k,v in connections_vrouter.items():
