@@ -13,17 +13,20 @@ from networkx import DiGraph, is_isomorphic, is_strongly_connected, weakly_conne
 __author__ = "Carlos Leocadio"
 __copyright__ = "Copyright (c) 2022 Carlos Leocadio"
 __license__ = "MIT"
-__version__ = "0.9.9"
+__version__ = "1.0.0"
 
 """
 bum-tree-checker.py: checks BUM tree graph connectivity using data from
-Contrail Controllers (3) and compares the tree programmed on vRouters.
-The script also retrieves Network and Port objects information from Openstack,
-so it assumes Openstack API is reachable and the env vars needed for auth are set
+Contrail Controllers (3) and compares the tree programmed on vRouters using CLI.
+In order to accomplish that, it retrieves Network and Port objects information from Openstack,
+so it assumes Openstack API is reachable and the environment variables needed for authorization
+are set.
 
 optional arguments:
   -h, --help            show this help message and exit
-  -n NET, --net NET     Virtual Network Object UUID
+  -n NETID, --netid NETID
+                        Virtual Network Object UUID
+  -a, --all             Check all VN objects
   -c CONTROLLERS [CONTROLLERS ...], --controllers CONTROLLERS [CONTROLLERS ...]
                         List of Contrail Controller addresses
   -d, --debug           Enable debug logging
@@ -56,7 +59,6 @@ def compare_edges_graphs(graph_a, graph_b):
     missing_edges_in_b = [e for e in edges_a if e not in edges_b]
     return missing_edges_in_b
 
-####
 
 def getElementsByTagName_safe(xml_elem, tag):
     n = None
@@ -128,17 +130,16 @@ def extract_mcast_tree_cc(connections, xml_f):
 
     return connections
 
-def run_cmd_remote(host, cmd):
+def run_cmd_remote(host, user, cmd):
     client = paramiko.SSHClient()
     client.load_system_host_keys()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    client.connect(host, username='heat-admin')
+    client.connect(host, username=user)
     stdin, stdout, stderr = client.exec_command(cmd)
     status = stdout.channel.recv_exit_status()
 
     if status >= 0: 
         result = stdout.read()
-        log.debug("Result {} " .format(result))
 
     client.close()
     return status, result
@@ -290,15 +291,10 @@ def main():
 
         # connect to each CC and extract local Mcast tree
         for c in ccs_list:
-            client = paramiko.SSHClient()
-            client.load_system_host_keys()
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            client.connect(c, username='heat-admin')
-            stdin, stdout, stderr = client.exec_command(cmd_string)
-            status = stdout.channel.recv_exit_status()
+            status, result = run_cmd_remote(c, 'heat-admin', cmd_string)
 
             if status >= 0: 
-                xml_dom = minidom.parse(stdout)
+                xml_dom = minidom.parseString(result)
                 pretty_xml_as_string = xml_dom.toprettyxml(encoding='UTF-8')
                 log.debug("XML file CC {}\n{} " .format(c, pretty_xml_as_string))
                 log.info("Extracting Mcast tree from Controller {} " .format(c))
@@ -306,7 +302,6 @@ def main():
             else:
                 log.error("Status Error while reading Mcast tree from {} " .format(c))
 
-            client.close()
 
         if len(connections) == 0:
             log.error("Unable to create connections matrix from Controllers - Skipping")
@@ -316,7 +311,7 @@ def main():
             for k,v in connections.items():
                 log.info("{} - {} " .format(k, json.dumps(v)))
 
-        
+  
         # at this point in code, we have the full connections matrix as programmed in the controllers
 
         """
@@ -352,24 +347,16 @@ def main():
 
         log.debug("curl CMD string {} " .format(cmd_string))
         for c in binding_hosts_set:
-            client = paramiko.SSHClient()
-            client.load_system_host_keys()
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            client.connect('.'.join([c,'ctlplane']), username='heat-admin')
-            stdin, stdout, stderr = client.exec_command(cmd_string)
-            status = stdout.channel.recv_exit_status()
+            status, result = run_cmd_remote('.'.join([c,'ctlplane']), 'heat-admin', cmd_string)
 
             if status >= 0: 
-                xml_dom = minidom.parse(stdout)
-                #pretty_xml_as_string = xml_dom.toprettyxml(encoding='UTF-8')
-                #log.debug("Fetching Interfaces XML file from Compute {}\n{} " .format(c, pretty_xml_as_string))
-                log.debug("Fetching Interfaces XML file from Compute {} belonging to network {} " .format(c, vrf_name))
+                xml_dom = minidom.parseString(result)
+                pretty_xml_as_string = xml_dom.toprettyxml(encoding='UTF-8')
+                log.debug("Fetching Interfaces XML file from Compute {}\n{} " .format(c, pretty_xml_as_string))
                 vifs_per_compute[c] = get_vifs_attached_net(port_ids_by_network[net_uuid], vrf_name, xml_dom)
                 vhost0_ips[c] = get_vhost0(xml_dom)
             else:
                 log.error("Status Error while reading ItfReq from {} " .format(c))
-
-            client.close()
 
         log.info("Listing Vif IDs per Compute")
         total_vifs_counter = 0
@@ -391,7 +378,7 @@ def main():
         for c,vifs in vifs_per_compute.items():
             for v in vifs:
                 cmd_a = ''.join(['sudo docker exec contrail_vrouter_agent vif --get ', v])
-                status, result = run_cmd_remote('.'.join([c,'ctlplane']), cmd_a)
+                status, result = run_cmd_remote('.'.join([c,'ctlplane']), 'heat-admin', cmd_a)
 
                 if status >= 0:
                     match = re.search(vrf_pattern, result)
@@ -399,7 +386,7 @@ def main():
                     log.debug("VRF {}" .format(vrf))
 
                 cmd_b = ''.join(['sudo docker exec contrail_vrouter_agent rt --get ff:ff:ff:ff:ff:ff --vrf ', vrf, ' --family bridge'])
-                status, result = run_cmd_remote('.'.join([c,'ctlplane']), cmd_b)
+                status, result = run_cmd_remote('.'.join([c,'ctlplane']), 'heat-admin', cmd_b)
 
                 if status >= 0:
                     match = re.search(nh_pattern, result)
@@ -407,7 +394,7 @@ def main():
                     log.debug("NH {}" .format(nh))
 
                 cmd_c = ''.join(['sudo docker exec contrail_vrouter_agent nh --get ', nh])
-                status, result = run_cmd_remote('.'.join([c,'ctlplane']), cmd_c)
+                status, result = run_cmd_remote('.'.join([c,'ctlplane']), 'heat-admin', cmd_c)
 
                 if status >= 0:
                     match_list = re.findall(vrf0_leg_pattern, result)
