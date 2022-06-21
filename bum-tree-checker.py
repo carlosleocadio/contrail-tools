@@ -276,7 +276,7 @@ def main():
             log.error("No subnets found on Network {}" .format(net_uuid))
 
 
-        if network_obj.project_id:
+        if network_obj is not None and network_obj.project_id:
             project_obj = conn.identity.find_project(network_obj.project_id)
             log.debug("Project: {} " .format(project_obj))
         else:
@@ -284,7 +284,7 @@ def main():
             continue
         
         # We actually don't use domain_obj, because we assume all are under 'default-domain'
-        if project_obj.domain_id:
+        if project_obj is not None and project_obj.domain_id:
             domain_obj = conn.identity.find_domain(project_obj.domain_id)
             log.debug("Domain: {} " .format(domain_obj))
 
