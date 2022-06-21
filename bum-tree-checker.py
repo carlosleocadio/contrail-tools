@@ -203,8 +203,8 @@ def main():
     # Number of Networks verified
     total_networks_verified = 0
 
-    # Number of problematic BUM trees detected
-    broken_trees = 0
+    # List of Network UUIDs with problematic BUM trees detected
+    broken_trees = []
 
     # virtual network uuid
     net_uuid = ''
@@ -281,11 +281,17 @@ def main():
             log.error("No subnets found on Network {}" .format(net_uuid))
 
 
-        project_obj = conn.identity.find_project(network_obj.project_id)
-        log.debug("Project: {} " .format(project_obj))
-
-        domain_obj = conn.identity.find_domain(project_obj.domain_id)
-        log.debug("Domain: {} " .format(domain_obj))
+        if network_obj.project_id:
+            project_obj = conn.identity.find_project(network_obj.project_id)
+            log.debug("Project: {} " .format(project_obj))
+        else:
+            log.error("No Project ID found on Network {}" .format(net_uuid))
+            continue
+        
+        # We actually don't use domain_obj, because we assume all are under 'default-domain'
+        if project_obj.domain_id:
+            domain_obj = conn.identity.find_domain(project_obj.domain_id)
+            log.debug("Domain: {} " .format(domain_obj))
 
         ##vrf_name = domain_obj.name + ':' + project_obj.name + ':' + network_obj.name + ':' + subnet_obj.name
         ##vrf_name = 'default-domain:NIMS_Core_RTL_REF:N_InternalOAM:N_InternalOAM'
@@ -483,10 +489,10 @@ def main():
             log.info("OK BUM tree for Network: {} " .format(net_uuid))
         else:
             log.info("NOK BUM tree for Network: {} " .format(net_uuid))
-            broken_trees+=1
+            broken_trees.append(net_uuid)
 
     log.info("### END ###")
-    log.info("Total Networks detected {}\nTotal Networks verified {}\nTotal broken BUM trees detected {}" .format(total_networks, total_networks_verified, broken_trees))
+    log.info("Total Networks detected {}\nTotal Networks verified {}\nTotal broken BUM trees detected {}\nNetworks with broken BUM tree {}" .format(total_networks, total_networks_verified, len(broken_trees), broken_trees))
 
 if __name__ == "__main__":
     main()
