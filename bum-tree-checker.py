@@ -141,17 +141,12 @@ def open_ssh_channel(host, user):
 
 
 def run_cmd_remote(client, cmd):
-    #client = paramiko.SSHClient()
-    #client.load_system_host_keys()
-    #client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    #client.connect(host, username=user)
     stdin, stdout, stderr = client.exec_command(cmd)
     status = stdout.channel.recv_exit_status()
 
     if status >= 0: 
         result = stdout.read()
 
-    #client.close()
     return status, result
 
 
