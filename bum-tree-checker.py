@@ -13,7 +13,7 @@ from networkx import DiGraph, is_isomorphic, is_strongly_connected, weakly_conne
 __author__ = "Carlos Leocadio"
 __copyright__ = "Copyright (c) 2022 Carlos Leocadio"
 __license__ = "MIT"
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 
 """
 bum-tree-checker.py: checks BUM tree graph connectivity using data from
