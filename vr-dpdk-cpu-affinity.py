@@ -345,6 +345,7 @@ def main():
     client = docker.from_env()
     containers = client.containers.list()
     nova_containerized = False
+    c_name = ''
     for c in containers:
         try:
             c_name = c.attrs['Config']['Labels']['container_name']
