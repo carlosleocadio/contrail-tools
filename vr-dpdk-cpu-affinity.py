@@ -3,7 +3,7 @@
 __author__ = "Carlos Leocadio"
 __copyright__ = "Copyright (c) 2022 Carlos Leocadio"
 __license__ = "MIT"
-__version__ = "0.7.0"
+__version__ = "0.9.3"
 
 """
 vr-dpdk-cpu-affinity.py: retrieves current affinity CPU settings of vRouter DPDK
@@ -27,10 +27,15 @@ import subprocess
 import logging
 import prettytable
 import psutil
-import itertools
+import os
 import re
 from collections import defaultdict
 import docker
+
+#setup log - Global
+logging.basicConfig(format='%(levelname)s %(message)s')
+log = logging.getLogger('vr-dpdk-cpu-affinity')
+
 
 def cli_menu():
     parser = argparse.ArgumentParser(
@@ -47,7 +52,11 @@ def cli_menu():
                     help="Set new CPU affinity for vRouter DPDK Control threads",
                     type=str
                     )
-
+    parser.add_argument('-d', '--debug',
+                        help="Enable debug logging",
+                        action="store_const", dest="loglevel", const=logging.DEBUG,
+                        default=logging.INFO)
+                        
     return parser.parse_args()
 
 
@@ -59,7 +68,7 @@ def run_check_output(cmd):
         out = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
         return (out, True)
     except subprocess.CalledProcessError as e:
-        logging.error("Error %s exec cmd %s  " % (e, cmd))
+        log.error("Error %s exec cmd %s  " % (e, cmd))
         return (None, False)
 
 
@@ -95,20 +104,33 @@ def expand_range(cpus_range):
         final_l += i
     return sorted(final_l)
 
+
+## Extract information from vif 0 output
+# The fabric interface will usually be a bond of 2 Slave Interfaces
+# Both slabe interfaces must belong to the same Card (PCI BUS) and
+# the PCI BUS must be on the same NUMA as the Forwarding/Processing threads
+# Get vif 0 output; confirm vif 0 output is present; extract slave pci info;
+# get numa for each slave pci; return numa node id for slaves
 def get_vif0_numa_node():
     out, flag = run_check_output('vif --get 0')
-    pci_pattern = re.compile(r'vif0\/0\s+PCI:\s(?P<pci_addr>\b(0{0,4}:\d{2}:\d{2}.\d:?\w*))', re.MULTILINE)
-    match_pci_addr = re.search(pci_pattern, str(out))
-    if flag and match_pci_addr:
-        pci_addr = match_pci_addr.group('pci_addr')
+    #pci_pattern = re.compile(r'vif0\/0\s+PCI:\s(?P<pci_addr>\b(0{0,4}:\d{2}:\d{2}.\d:?\w*))', re.MULTILINE)
+    slave_pattern = re.compile(r'Slave\sInterface\((?P<slave_id>\d+)\):\s(?P<pci_addr>\b(0{0,4}:\w{2}:\w{2}.\d:?\w*))', re.MULTILINE)
+
+    # lookup for slaves info
+    slave_numa_nodes = []
+    match_slave_pci_addr = re.findall(slave_pattern, str(out))
+    if flag and match_slave_pci_addr:
+        for match_slave in match_slave_pci_addr:
+            slave_pci_addr = match_slave[1]
+            slave_pci_numa_node_file = ''.join(['/sys/bus/pci/devices/', slave_pci_addr ,'/numa_node']) 
+            with open(slave_pci_numa_node_file) as f:
+                numa_id = int(f.readlines()[0].rstrip())
+                log.info("VIF 0 Slave {} - PCI {} - NUMA {} " .format(match_slave[0], match_slave[1], numa_id))
+                slave_numa_nodes.append(numa_id)
     else:
         return None
-    
-    pci_numa_node_file = '/sys/bus/pci/devices/' + pci_addr + '/numa_node'
-    with open(pci_numa_node_file) as f:
-        vif0_numa_node = f.readlines()
-    
-    return int(vif0_numa_node[0].rstrip())
+
+    return slave_numa_nodes
         
 
 def read_file(full_path):
@@ -117,7 +139,11 @@ def read_file(full_path):
             content = f.read()
     except IOError as e:
         content = None
-        print("%s file not found" % full_path)
+
+    if content and (len(content) == 1) and (content[0] == '\n'):
+        log.warning("File {} is empty" .format(full_path))
+        content = None
+
     return content
     
 
@@ -130,6 +156,21 @@ def extract_nova_cpu_list(nova_conf):
         nova_cpus_list = expand_range(nova_cpu_set_string)
     return nova_cpus_list
     
+def extract_cpu_isol_config(file_path, regex_pattern):
+    config = read_file(file_path)
+    cpus_isolated = []
+
+    if config:
+        isol_pattern = re.compile(regex_pattern, re.MULTILINE)
+        match_isol = re.search(isol_pattern, config)
+        if match_isol:
+            isolcpus_string = match_isol.group(1)
+            log.info("Isolcpus configuration found in {} - {}" .format(file_path, isolcpus_string))
+            cpus_isolated = expand_range(isolcpus_string)
+    else:
+        log.error("Unable to read {}" .format(file_path))
+
+    return cpus_isolated
 
 class CpuInfo:
 
@@ -213,6 +254,22 @@ class CpuInfo:
 
 def main():
 
+    service_cpus = None
+    control_cpus = None
+
+    args = cli_menu()
+
+    log.setLevel(args.loglevel)
+    log.info("Starting vr-dpdk-cpu-affinity.py v{} " .format(__version__))
+
+    if args.service:
+        service_cpus = args.service
+        log.info("Service CPUs: {}" .format(service_cpus))
+
+    if args.control:
+        control_cpus = args.control
+        log.info("Control CPUs: {}" .format(control_cpus))
+
     PROC_LEGEND = {
         'A' : "vRouter Agent thread",
         'S' : "vRouter DPDK Service thread",
@@ -236,20 +293,20 @@ def main():
 
     VR_DPDK_PROC_NAME = "contrail-vrouter-dpdk"
     VR_AGENT_PROC_NAME = "contrail-vrouter-agent"
-
-    logging.basicConfig(level=logging.INFO, format='%(levelname)-8s %(message)s')
-    logging.info('vr-dpdk-cpu-affinity - Started')
-
-    args = cli_menu()
+    NOVA_COMP_PROC_NAME = "nova-compute"
+    TUNED_PROC_NAME = "tuned"
 
     vr_dpdk_proc = get_proc(VR_DPDK_PROC_NAME)
     if vr_dpdk_proc:
-        logging.info("contrail-vrouter-dpdk PID: {}" .format(vr_dpdk_proc.pid))
+        log.info("contrail-vrouter-dpdk PID: {}" .format(vr_dpdk_proc.pid))
+    else:
+        log.error("Unable to detect {} process" .format(VR_DPDK_PROC_NAME))
 
     vr_agent_proc = get_proc(VR_AGENT_PROC_NAME)
     if vr_agent_proc:
-        logging.info("contrail-vrouter-agent PID: {}" .format(vr_agent_proc.pid))
-
+        log.info("contrail-vrouter-agent PID: {}" .format(vr_agent_proc.pid))
+    else:
+        log.error("Unable to detect {} process" .format(VR_AGENT_PROC_NAME))
 
     ## CPU Info object
     cpu_info = CpuInfo()
@@ -279,9 +336,13 @@ def main():
     fwd_threads_affinity_lists = []
     cpus_dpdk_fwd = []
 
-    # vif0 NUMA node
+    # Method returns a list of NUMA nodes IDs of vif 0 slave interfaces 
     vif0_numa = get_vif0_numa_node()
-    logging.info("vRouter Interface VIF 0 on NUMA Node {}" .format(vif0_numa))
+    if len(set(vif0_numa)) > 1:
+        log.error("Both VIF 0 Slave Interfaces must belong to the same NUMA")
+    else:
+        vif0_numa = vif0_numa[0]
+        log.info("vRouter Interface VIF 0 on NUMA Node {}" .format(vif0_numa))
 
     # Isolated CPU cores
     cpus_isolated = []
@@ -290,89 +351,101 @@ def main():
     nova_cpus_list = []
 
 
-    #### CPU isolation verification
-    # either we have the isolation in cmdline isolcpus= 
-    # or enforced by tuned
-    # Check if cpu_partitioning profile is active_profile in tuned
-    # if it is, then assume tuned is enforcing cpu isolation
-    # else
-    # check cmdline for cpuisolation settings
-
+    ## CPU isolation verification
+    # In some setups Tuned is used to configure cpu-partitioning
+    # allowing a set of isolated and a set of housekeeping CPUs.
+    # If Tuned is not present, then assume isolation is enforced using
+    # isolcpus parameter from boot args [cmdline] which will reflect
+    # on /sys/devices/system/cpu/isolated
 
     tuned_active_profile = read_file('/etc/tuned/active_profile')
     
     if tuned_active_profile and 'cpu-partitioning' in tuned_active_profile:
-        tuned_config = read_file('/etc/tuned/cpu-partitioning-variables.conf')
-
-        if tuned_config:
-            #print("tuned profile: %s" % tuned_content)
-            tuned_isol_pattern = re.compile(r'^isolated_cores=(.*)', re.MULTILINE)
-            match_isol = re.search(tuned_isol_pattern, tuned_config)
-            if match_isol:
-                isolcpus_string = match_isol.group(1)
-                logging.info("Isolcpus configuration found in tuned {}" .format(isolcpus_string))
-                cpus_isolated = expand_range(isolcpus_string)
-        else:
-            logging.info("Unable to get tuned cpu-partitioning configuration")
-
-
+        cpus_isolated = extract_cpu_isol_config('/etc/tuned/cpu-partitioning-variables.conf', r'^isolated_cores=(.*)')
     else:
-        cmdline_content = read_file('/proc/cmdline')
-        if 'isolcpus' in cmdline_content:
-            logging.info('isolcpus in cmdline')
-        else:
-            logging.info('isolcpus configuration not present in cmdline')
-
-    if cpus_isolated:
+        cpus_isolated_file = read_file('/sys/devices/system/cpu/isolated')
+        if cpus_isolated_file:
+            cpus_isolated = expand_range(cpus_isolated_file)
+    
+    
+    if len(cpus_isolated) > 0:
+        log.debug("Isolated CPUs List {} " .format(cpus_isolated))
         if max(cpus_isolated) > max(cpu_info.data.keys()):
-            logging.info("Error in tuned isolated_cores parameter - highest CPU ID configured in tuned doesn't exist in this setup")
+            log.error("Error in isolated CPUs configuration - highest CPU ID doesn't exist in this setup")
+        else:
+            # initialize isolated attribute according to cpus_isolated list - set to False by default
+            for cpuid, attrs in cpu_info.data.items():
+                if cpuid in cpus_isolated: attrs['isolated'] = True
+                else: attrs['isolated'] = False
+    else:
+        log.error("Unable to detect CPU Isolation configuration")
+
+
+
+    ## CPU pstate needs to be disabled - check status
+    # /sys/devices/system/cpu/intel_pstate/status
+    # if the file is not present, then p state driver is not loaded
+    # possible values of status are: passive, active and off
+    pstate = read_file('/sys/devices/system/cpu/intel_pstate/status')
+    if pstate and 'active' in pstate:
+        log.error("Intel CPU P-State scaling driver is Active - should be disabled")
+    else:
+        log.info("Intel CPU P-State scaling driver status - {}" .format(pstate))
+
 
     
-    for cpuid, attrs in cpu_info.data.items():
-        # initialize isolated attribute according to cpus_isolated list - set to False by default
-        if cpuid in cpus_isolated: attrs['isolated'] = True
-        else: attrs['isolated'] = False
+    ## Check no_hz and rcu_nocbs
+    # /sys/devices/system/cpu/nohz_full
+    # nohz_full and rcu_nocbs should match
+    nohz = read_file('/sys/devices/system/cpu/nohz_full')
+    #if nohz:
+    #    print(nohz)
         
 
     #########################
-    ## Get cores used by Nova
-    ## get the details from /etc/nova/nova.conf file inside nova-compute container
-    ## TODO what if there is no such container? improve this logic here to make it more
-    ## generic. Eventually nova might not even be present, for instance in k8s environments
+    ## Get cores used by Nova Compute service from /etc/nova/nova.conf
+    ## For containerized service, read configuration file inside nova-compute container
+    ## If container is not present, then service runs directly on host
+    ## TODO add support for k8s orchestrator 
+    ## TODO add option to connect to podman instead of docker
 
-    # Connect to docker/podman and check if there is a running container name nova.
+    # Check if nova-compute service is running
+    nova_proc = get_proc(NOVA_COMP_PROC_NAME)
+    if nova_proc:
+        log.info("nova-compute PID: {}" .format(nova_proc.pid))
 
-    client = docker.from_env()
-    containers = client.containers.list()
-    nova_containerized = False
-    c_name = ''
-    for c in containers:
-        try:
-            c_name = c.attrs['Config']['Labels']['container_name']
-        except KeyError:
-            pass
-        if 'nova_compute' in c_name:
-            #found nova_compute container
-            nova_containerized = True
-            break
+        client = docker.from_env()
+        containers = client.containers.list()
+        nova_containerized = False
+        c_name = ''
+        for c in containers:
+            try:
+                c_name = c.attrs['Config']['Labels']['container_name']
+            except KeyError:
+                pass
+            if 'nova_compute' in c_name:
+                #found nova_compute container
+                nova_containerized = True
+                break
 
-    # bad approach
-    if nova_containerized:
-        out, flag = run_check_output('docker exec nova_compute cat /etc/nova/nova.conf')
+        if nova_containerized:
+            out, flag = run_check_output('docker exec nova_compute cat /etc/nova/nova.conf')
+        else:
+            out = read_file('/etc/nova/nova.conf')
+
+
+        if  nova_containerized and flag:
+            nova_cpus_list = extract_nova_cpu_list(out)
+        else:
+            nova_cpus_list = extract_nova_cpu_list(out)
+
+        if len(nova_cpus_list) > 0:
+            log.debug("Nova vCPU List {} " .format(nova_cpus_list))
+        else:
+            log.error('Unable to find Nova vCPU List on configuration file')
+    
     else:
-
-        out = read_file('/etc/nova/nova.conf')
-
-
-    if  nova_containerized and flag:
-        nova_cpus_list = extract_nova_cpu_list(out)
-    else:
-        nova_cpus_list = extract_nova_cpu_list(out)
-
-    if len(nova_cpus_list) > 0:
-        logging.info("Nova vCPU List {} " .format(nova_cpus_list))
-    else:
-        logging.error('Unable to find Nova vCPU List on configuration file')
+        log.warning("nova-compute service not found")
 
 
     #########################
@@ -384,7 +457,7 @@ def main():
 
     r = compare_affinity_lists(agent_threads_affinity_lists)
     if r:
-        logging.warning("Mismatch detected in vRouter Agent Threads affinity settings - some are using different affinity than others")
+        log.warning("Mismatch detected in vRouter Agent Threads affinity settings - some are using different affinity than others")
 
     cpus_agent = merge_lists_and_extract_set(agent_threads_affinity_lists)
 
@@ -405,14 +478,14 @@ def main():
     # check if all service threads are having the same CPU affinity settings
     r = compare_affinity_lists(srv_threads_affinity_lists)
     if r:
-        logging.warning("Mismatch detected in Service Threads affinity settings - some are using different affinity than others")
+        log.warning("Mismatch detected in Service Threads affinity settings - some are using different affinity than others")
 
     cpus_dpdk_srv = merge_lists_and_extract_set(srv_threads_affinity_lists)
 
     # check if all control threads are having the same CPU affinity settings
     r = compare_affinity_lists(ctrl_threads_affinity_lists)
     if r:
-        logging.warning("Mismatch detected in Control Threads affinity settings - some are using different affinity than others")
+        log.warning("Mismatch detected in Control Threads affinity settings - some are using different affinity than others")
 
     cpus_dpdk_ctrl = merge_lists_and_extract_set(ctrl_threads_affinity_lists)
 
@@ -475,7 +548,7 @@ def main():
     # on the same NUMA as Forwarding threads
     # TODO confirm isolation
     if len(cpus_dpdk_srv) > 2:
-        logging.warning("Service Threads affinity size is {} - recommended 2" .format(len(cpus_dpdk_srv)))
+        log.warning("Service Threads affinity size is {} - recommended 2" .format(len(cpus_dpdk_srv)))
     for cpuid in cpus_dpdk_srv:
         #if cpuid is outside vif0 numa, mark as violation of rule E
         if cpu_info.get_numa(cpuid) != vif0_numa:
@@ -488,7 +561,7 @@ def main():
     # on the same NUMA as Forwarding threads
     # TODO confirm isolation
     if len(cpus_dpdk_ctrl) > 2:
-        logging.warning("Control Threads affinity size is {} - recommended 2" .format(len(cpus_dpdk_ctrl)))
+        log.warning("Control Threads affinity size is {} - recommended 2" .format(len(cpus_dpdk_ctrl)))
     for cpuid in cpus_dpdk_ctrl:
         #if cpuid is outside vif0 numa, mark as violation of rule E
         if cpu_info.get_numa(cpuid) != vif0_numa:
@@ -571,9 +644,30 @@ def main():
     for k in sorted(rules_keys):
         print('{} - {} ' .format(k,RULES.get(k)))
 
+    #### MASTER TABLE PRESENTED WITH CURRENT SETTINGS #####
+    ## force exit here - the remaining code is not yet finished
+    exit(1)
+
+    ### CODE BELOW WILL ALLOW CPU AFFINITY CHANGES ON SERVICE AND CONTROL THEADS IN RUNTIME
+
+    if service_cpus is None and control_cpus is None:
+        log.info('vr-dpdk-cpu-affinity.py - Ended - no changed performed')
+        exit(1)
+
+    else:
+        if service_cpus is not None:
+            log.info("Changing PIDs {} - Service Threads - affinity to {}" .format(srvc_ts, service_cpus))
+            for st in srvc_ts:
+                log.debug("Taskset {} to {}" .format(st.id, service_cpus))
+                run_check_output(['taskset', '-pc', service_cpus, st.id])
+
+        if control_cpus is not None:
+            log.info("Changing PIDs {} - Control Threads - affinity to {}" .format(ctrl_ts, control_cpus))
+            for ct in ctrl_ts:
+                log.debug("Taskset {} to {}" .format(ct.id, control_cpus))
+                run_check_output(['taskset', '-pc', control_cpus, ct.id])
+
+
 
 if __name__ == "__main__":
     main()
-
-
-
