@@ -3,7 +3,7 @@
 __author__ = "Carlos Leocadio"
 __copyright__ = "Copyright (c) 2022 Carlos Leocadio"
 __license__ = "MIT"
-__version__ = "0.9.3"
+__version__ = "0.9.5"
 
 """
 vr-dpdk-cpu-affinity.py: retrieves current affinity CPU settings of vRouter DPDK
@@ -27,7 +27,6 @@ import subprocess
 import logging
 import prettytable
 import psutil
-import os
 import re
 from collections import defaultdict
 import docker
@@ -73,6 +72,7 @@ def run_check_output(cmd):
 
 
 def get_proc(proc_name):
+    # type: (psutil.Process) -> psutil.Process
     for proc in psutil.process_iter():
         if proc_name in proc.name():
             return proc
@@ -172,6 +172,21 @@ def extract_cpu_isol_config(file_path, regex_pattern):
 
     return cpus_isolated
 
+
+## Utility method will produce and show a table with current 
+# CPU affinity for a given Process object
+def show_process_affinity_table(proc_obj):
+    # type: (psutil.Process) -> None
+    output_table = prettytable.PrettyTable()
+    output_table.field_names = ["PID/SPID", "Proc. Name", "CPU Affinity"]
+
+    for thread in proc_obj.threads():
+        p = psutil.Process(thread.id)
+        output_table.add_row([thread.id, p.name(), p.cpu_affinity()])
+    
+    output_table.sortby = "PID/SPID"
+    log.info("Current Affinity Table for Process {}\n{}" .format(proc_obj, output_table))
+
 class CpuInfo:
 
     def __init__(self):
@@ -224,6 +239,7 @@ class CpuInfo:
             if phy_cpuid != c and attrs['core'] == phy_cpuid:
                 return c
     
+    # return numa id for cpuid
     def get_numa(self, cpuid):
         return self.data.get(cpuid).get('numa')
 
@@ -262,12 +278,14 @@ def main():
     log.setLevel(args.loglevel)
     log.info("Starting vr-dpdk-cpu-affinity.py v{} " .format(__version__))
 
+    # TODO add validation for service_cpus and control_cpus passed as argument
+    # to ensure the user is setting a valid affinity according to the rules/guidelines
     if args.service:
-        service_cpus = args.service
+        service_cpus = expand_range(args.service)
         log.info("Service CPUs: {}" .format(service_cpus))
 
     if args.control:
-        control_cpus = args.control
+        control_cpus = expand_range(args.control)
         log.info("Control CPUs: {}" .format(control_cpus))
 
     PROC_LEGEND = {
@@ -299,12 +317,14 @@ def main():
     vr_dpdk_proc = get_proc(VR_DPDK_PROC_NAME)
     if vr_dpdk_proc:
         log.info("contrail-vrouter-dpdk PID: {}" .format(vr_dpdk_proc.pid))
+        show_process_affinity_table(vr_dpdk_proc)
     else:
         log.error("Unable to detect {} process" .format(VR_DPDK_PROC_NAME))
 
     vr_agent_proc = get_proc(VR_AGENT_PROC_NAME)
     if vr_agent_proc:
         log.info("contrail-vrouter-agent PID: {}" .format(vr_agent_proc.pid))
+        show_process_affinity_table(vr_agent_proc)
     else:
         log.error("Unable to detect {} process" .format(VR_AGENT_PROC_NAME))
 
@@ -592,8 +612,7 @@ def main():
     ### BUILD MASTER TABLE FOR DATA PRESENTATION
 
     master_table = prettytable.PrettyTable()
-    out, flag = run_check_output(['hostname'])
-    master_table.title = "Host: {}".format(str(out.strip()))
+
     # table columns are dynamic, depending on HT capability and number of NUMAs
     # base building block is per NUMA is | CPU ID (PHY) | Isolated | PROC | CPU ID (HT) | Isolated | PROC |
     for numa in cpu_info.numa_nodes:
@@ -658,14 +677,14 @@ def main():
         if service_cpus is not None:
             log.info("Changing PIDs {} - Service Threads - affinity to {}" .format(srvc_ts, service_cpus))
             for st in srvc_ts:
-                log.debug("Taskset {} to {}" .format(st.id, service_cpus))
-                run_check_output(['taskset', '-pc', service_cpus, st.id])
+                log.debug("Setting Service Thread PID {} affinity to {}" .format(st.id, service_cpus))
+                st.cpu_affinity(service_cpus)
 
         if control_cpus is not None:
             log.info("Changing PIDs {} - Control Threads - affinity to {}" .format(ctrl_ts, control_cpus))
             for ct in ctrl_ts:
-                log.debug("Taskset {} to {}" .format(ct.id, control_cpus))
-                run_check_output(['taskset', '-pc', control_cpus, ct.id])
+                log.debug("Setting Control Thread PID {} affinity to {}" .format(ct.id, control_cpus))
+                ct.cpu_affinity(control_cpus)
 
 
 
