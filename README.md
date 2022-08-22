@@ -10,3 +10,11 @@ Information about contrail-tools container can be found [here](https://docs.tung
 
 This repository will host tools to troubleshoot Contrail Networking environemnts [Tungsten Fabric], in the form of standalone scripts.
 For each script present in *main* branch, a page in repository's wiki with usage instructions will be present.
+
+
+
+### How To Wiki series
+
+* [Decoding core dump files from Contrail processes](https://github.com/carlosleocadio/contrail-tools/wiki/How-To:-Decoding-core-dump-files-from-Contrail-processes)
+
+* [Extracting sandesh trace buffers from vRouter Agent core dump] (https://github.com/carlosleocadio/contrail-tools/wiki/How-To:-Extracting-sandesh-trace-buffers-from-vRouter-Agent-core-dump)
