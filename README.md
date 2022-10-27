@@ -18,3 +18,6 @@ For each script present in *main* branch, a page in repository's wiki with usage
 * [Decoding core dump files from Contrail processes](https://github.com/carlosleocadio/contrail-tools/wiki/How-To:-Decoding-core-dump-files-from-Contrail-processes)
 
 * [Extracting sandesh trace buffers from vRouter Agent core dump](https://github.com/carlosleocadio/contrail-tools/wiki/How-To:-Extracting-sandesh-trace-buffers-from-vRouter-Agent-core-dump)
+
+
+* [Verifying Broadcast, Unknown-Unicast and Multicast (BUM) tree] (https://github.com/carlosleocadio/contrail-tools/wiki/bum-tree-checker.py-Usage-Information)
