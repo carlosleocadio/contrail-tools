@@ -10,7 +10,9 @@ import seaborn as sns
 import argparse
 from collections import OrderedDict
 
-## PARSER V3
+__copyright__ = "Copyright (c) 2022 Carlos Leocadio"
+__license__ = "MIT"
+__version__ = "1.0.0"
 
 MAX_WINDOW_MINUTES = 60
 
