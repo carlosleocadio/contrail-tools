@@ -41,6 +41,7 @@ curl -s -k --key $KEYFILE --cert $CERT https://127.0.0.1:8083/Snh_ShowRouteReq?r
 curl -s -k --key $KEYFILE --cert $CERT https://127.0.0.1:8083/Snh_ShowRouteReq?routing_table=&prefix=&longer_match=&shorter_match=&count=&start_routing_table=&start_routing_instance=&start_prefix=&source=&protocol=&family=inet | xmllint --format - >  "${HN}_ShowRouteReq_All.xml"
 curl -s -k --key $KEYFILE --cert $CERT https://127.0.0.1:8083/Snh_ShowRouteReq?x=inet.0 | xmllint --format - > "${HN}_RouteReq_inet0.xml"
 curl -s -k --key $KEYFILE --cert $CERT https://127.0.0.1:8083/Snh_ShowRouteReq?x=bgp.evpn.0 | xmllint --format - > "${HN}_RouteReq_bgpEvp0.xml"
+curl -s -k --key $KEYFILE --cert $CERT https://127.0.0.1:8083/Snh_ShowRouteReq?x=bgp.l3vpn.0 | xmllint --format - > "${HN}_RouteReq_L3VPN.xml"
 
 curl -s -k --key $KEYFILE --cert $CERT http://127.0.0.1:8083/Snh_ShowStaticRouteReq?search_string=RI  | xmllint --format - > "${HN}_static_route_request.xml"
 
