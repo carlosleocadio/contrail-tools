@@ -1,5 +1,5 @@
-## Get contrail controller introspect traces
 #!/bin/bash
+## Get contrail controller introspect traces
 ## CFTS - Carlos Leocadio
 
 HN=$(hostname -s)
