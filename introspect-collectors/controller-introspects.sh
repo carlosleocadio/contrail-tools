@@ -3,6 +3,8 @@
 ## CFTS - Carlos Leocadio
 
 HN=$(hostname -s)
+KEYFILE='/etc/contrail/ssl/private/server-privkey.pem'
+CERT='/etc/contrail/ssl/certs/server.pem'
 
 #Set RI (x:y:a:b) and PREFIX (1.2.3.4) variables in order to query specific Routing Instance
 RI=
@@ -36,7 +38,7 @@ curl -s -k --key $KEYFILE --cert $CERT https://127.0.0.1:8083/Snh_ShowRoutingIns
 
 # RouteReq
 curl -s -k --key $KEYFILE --cert $CERT https://127.0.0.1:8083/Snh_ShowRouteReq?routing_table=&routing_instance=$RI&prefix=$PREFIX&longer_match=&shorter_match=&count=&start_routing_table=&start_routing_instance=&start_prefix=&source=&protocol=&family=inet | xmllint --format - >  "${HN}_ShowRouteReq_${RI}_${PREFIX}.xml"
-curl -s -k --key $KEYFILE --cert $CERT https://127.0.0.1:8083/Snh_ShowRouteReq?routing_table=&routing_instance=$RI&prefix=&longer_match=&shorter_match=&count=&start_routing_table=&start_routing_instance=&start_prefix=&source=&protocol=&family=inet | xmllint --format - >  "${HN}_ShowRouteReq_All.xml"
+curl -s -k --key $KEYFILE --cert $CERT https://127.0.0.1:8083/Snh_ShowRouteReq?routing_table=&prefix=&longer_match=&shorter_match=&count=&start_routing_table=&start_routing_instance=&start_prefix=&source=&protocol=&family=inet | xmllint --format - >  "${HN}_ShowRouteReq_All.xml"
 curl -s -k --key $KEYFILE --cert $CERT https://127.0.0.1:8083/Snh_ShowRouteReq?x=inet.0 | xmllint --format - > "${HN}_RouteReq_inet0.xml"
 curl -s -k --key $KEYFILE --cert $CERT https://127.0.0.1:8083/Snh_ShowRouteReq?x=bgp.evpn.0 | xmllint --format - > "${HN}_RouteReq_bgpEvp0.xml"
 
