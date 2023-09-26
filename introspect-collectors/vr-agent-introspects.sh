@@ -50,4 +50,8 @@ curl -k https://127.0.0.1:8085/Snh_SandeshTraceRequest?x=RouteMplsData | xmllint
 
 curl -k https://127.0.0.1:8085/Snh_SandeshTraceRequest?x=PathPreference | xmllint --format - > "${HN}_PathPreference.xml"
 
+curl -k https://127.0.0.1:8085/Snh_VrfListReq | xmllint --format - > "${HN}_Snh_VrfListReq.xml"
+
+curl -k https://127.0.0.1:8085/Snh_ItfReq | xmllint --format - > "${HN}_Snh_ItfReq.xml"
+
 tar -czvf "${DATE}_${HN}_VrAgentTraces.tar.gz" *.xml --remove-files
