@@ -54,4 +54,6 @@ curl -k https://127.0.0.1:8085/Snh_VrfListReq | xmllint --format - > "${HN}_Snh_
 
 curl -k https://127.0.0.1:8085/Snh_ItfReq | xmllint --format - > "${HN}_Snh_ItfReq.xml"
 
+curl -k https://127.0.0.1:8085/Snh_AclReq | xmllint --format - > "${HN}_SnhAclReq.xml"
+
 tar -czvf "${DATE}_${HN}_VrAgentTraces.tar.gz" *.xml --remove-files
